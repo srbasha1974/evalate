@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Evaluator Dashboard — Kedil Evaluation Portal</title>
+  <link rel="stylesheet" href="../shared/styles.css">
+</head>
+<body>
+
+  <div class="topbar">
+    <div class="brand">Evaluator Dashboard<small>Kedil Evaluation Portal</small></div>
+    <div class="who">
+      <span id="who-email"></span>
+      <button class="btn btn-sm btn-ghost hidden" id="btn-signout" style="color:#fff;border-color:rgba(255,255,255,0.5)">Sign out</button>
+    </div>
+  </div>
+
+  <!-- Not configured -->
+  <div id="screen-config" class="wrap hidden">
+    <div class="card center-note">
+      <div class="big">&#9881;&#65039;</div>
+      <h2>Portal not configured yet</h2>
+      <p>Supabase URL and key are missing in <code>shared/config.js</code>.</p>
+    </div>
+  </div>
+
+  <!-- Login -->
+  <div id="screen-auth" class="wrap hidden">
+    <div class="card auth-card">
+      <h2>Evaluator sign-in</h2>
+      <p class="lead" style="font-size:0.9rem">Sign in with an account listed as an evaluator. New evaluators: create an account on the <a href="../embedded/">candidate page</a> first, then ask an existing evaluator to add you.</p>
+      <form id="auth-form">
+        <label for="auth-email">Email</label>
+        <input type="email" id="auth-email" autocomplete="email" required>
+        <label for="auth-password">Password</label>
+        <input type="password" id="auth-password" autocomplete="current-password" required>
+        <div style="margin-top:18px">
+          <button type="submit" class="btn" style="width:100%" id="auth-submit">Sign in</button>
+        </div>
+        <div id="auth-msg" class="hidden msg"></div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Not an admin -->
+  <div id="screen-denied" class="wrap hidden">
+    <div class="card center-note">
+      <div class="big">&#128683;</div>
+      <h2>Not authorized</h2>
+      <p>This account is not on the evaluator list.</p>
+    </div>
+  </div>
+
+  <!-- Dashboard -->
+  <div id="screen-dash" class="wrap wrap-wide hidden">
+    <div class="tabs">
+      <button id="tab-assessments" class="active">Assessments</button>
+      <button id="tab-candidates">Candidates</button>
+      <button id="tab-evaluators">Evaluators</button>
+    </div>
+
+    <div id="panel-assessments">
+      <div class="card">
+        <h2>Assessments</h2>
+        <div id="assess-list"></div>
+      </div>
+      <div id="assess-detail" class="hidden" style="margin-top:20px"></div>
+    </div>
+
+    <div id="panel-candidates" class="hidden">
+      <div class="card">
+        <h2>Candidates</h2>
+        <p class="lead" style="font-size:0.9rem">New accounts must be approved before the candidate can start an assessment.</p>
+        <div id="cand-list"></div>
+      </div>
+    </div>
+
+    <div id="panel-evaluators" class="hidden">
+      <div class="card">
+        <h2>Evaluators</h2>
+        <div id="admin-list" style="margin-bottom:16px"></div>
+        <form id="add-admin-form" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+          <div style="flex:1;min-width:220px">
+            <label for="new-admin-email">Add evaluator by email</label>
+            <input type="email" id="new-admin-email" placeholder="person@example.com" required>
+          </div>
+          <button class="btn" type="submit">Add</button>
+        </form>
+        <div id="admin-msg" class="hidden msg"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="../shared/config.js"></script>
+  <script src="../embedded/data.js"></script>
+  <script src="../service/data.js"></script>
+  <script src="admin.js"></script>
+</body>
+</html>

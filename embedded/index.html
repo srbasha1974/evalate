@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Embedded Engineer Evaluation — Kedil</title>
+  <link rel="stylesheet" href="../shared/styles.css">
+</head>
+<body>
+
+  <div class="topbar" id="topbar">
+    <div class="brand">Embedded Engineer Evaluation<small>Kedil Evaluation Portal</small></div>
+    <div class="who">
+      <span id="who-name"></span>
+      <button class="btn btn-sm btn-ghost" id="btn-signout" style="color:#fff;border-color:rgba(255,255,255,0.5)">Sign out</button>
+    </div>
+  </div>
+
+  <!-- Not configured -->
+  <div id="screen-config" class="wrap hidden">
+    <div class="card center-note">
+      <div class="big">&#9881;&#65039;</div>
+      <h2>Portal not configured yet</h2>
+      <p>Supabase URL and key are missing in <code>shared/config.js</code>.</p>
+    </div>
+  </div>
+
+  <!-- Auth -->
+  <div id="screen-auth" class="wrap hidden">
+    <div class="card auth-card">
+      <div class="auth-tabs">
+        <button id="tab-login" class="active">Sign in</button>
+        <button id="tab-signup">Create account</button>
+      </div>
+      <form id="auth-form">
+        <div id="signup-fields" class="hidden">
+          <label for="auth-first">First name</label>
+          <input type="text" id="auth-first" autocomplete="given-name">
+          <label for="auth-last">Last name</label>
+          <input type="text" id="auth-last" autocomplete="family-name">
+        </div>
+        <label for="auth-email">Email</label>
+        <input type="email" id="auth-email" autocomplete="email" required>
+        <label for="auth-password">Password</label>
+        <input type="password" id="auth-password" autocomplete="current-password" required minlength="6">
+        <div style="margin-top:18px">
+          <button type="submit" class="btn" id="auth-submit" style="width:100%">Sign in</button>
+        </div>
+        <div id="auth-msg" class="hidden msg"></div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Awaiting approval -->
+  <div id="screen-pending" class="wrap hidden">
+    <div class="card center-note">
+      <div class="big">&#8987;</div>
+      <h2>Account awaiting approval</h2>
+      <p>Thanks<span id="pending-name"></span> — your account has been created.<br>
+         The evaluation team must approve it before you can start. Please check back later.</p>
+      <button class="btn btn-ghost" id="btn-pending-refresh">Check again</button>
+    </div>
+  </div>
+
+  <!-- Level selection -->
+  <div id="screen-levels" class="wrap hidden">
+    <h1>Choose your experience level</h1>
+    <p class="lead">Pick the level that matches your experience. <strong>Each level allows only one attempt</strong>, and the assessment is timed — start when you are ready.</p>
+    <div class="tiles" id="level-tiles"></div>
+  </div>
+
+  <!-- Instructions -->
+  <div id="screen-instructions" class="wrap hidden">
+    <div class="card" style="max-width:640px;margin:0 auto">
+      <h1 id="ins-title"></h1>
+      <div id="ins-details"></div>
+      <h2 style="margin-top:18px">Choose your topics</h2>
+      <p class="lead" style="font-size:0.9rem;margin-bottom:8px">Untick any topic you do not want to be tested on. Your selection is final once you start.</p>
+      <div id="ins-topics"></div>
+      <div id="ins-summary" class="msg msg-info" style="margin-top:10px"></div>
+      <div class="msg msg-info" style="margin-top:16px">
+        <strong>Rules</strong>
+        <ul style="margin:8px 0 0;padding-left:20px">
+          <li>Only the topics selected above are included — the selection cannot be changed after starting.</li>
+          <li>The timer starts the moment you click <em>Start assessment</em> and cannot be paused.</li>
+          <li>You get <strong>one attempt</strong>. Closing the browser does not stop the clock — you can rejoin and continue until time runs out.</li>
+          <li>Answers are saved automatically as you go.</li>
+          <li>When time is up, whatever is saved is submitted automatically.</li>
+          <li>Coding questions are written in the built-in editor — the code is reviewed by an evaluator, it is not compiled.</li>
+        </ul>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:20px">
+        <button class="btn btn-ghost" id="btn-ins-back">Back</button>
+        <button class="btn" id="btn-ins-start">Start assessment</button>
+      </div>
+      <div id="ins-msg" class="hidden msg"></div>
+    </div>
+  </div>
+
+  <!-- Exam -->
+  <div id="screen-exam" class="hidden">
+    <div class="exam-bar">
+      <div>
+        <strong id="exam-level"></strong>
+        <span class="save-state" id="save-state"></span>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px">
+        <div class="timer" id="timer">--:--</div>
+        <button class="btn btn-sm" id="btn-submit" style="background:#fff;color:var(--accent-dark)">Submit</button>
+      </div>
+    </div>
+    <div class="exam-body">
+      <nav class="palette" id="palette"></nav>
+      <main class="q-area">
+        <div class="card">
+          <div class="q-module" id="q-module"></div>
+          <div class="q-text" id="q-text"></div>
+          <div id="q-image" class="q-image hidden"></div>
+          <div id="q-options"></div>
+          <div id="q-coding" class="hidden">
+            <textarea class="code-editor" id="code-input" spellcheck="false" placeholder="// Write your C code here"></textarea>
+            <div class="code-hint">Tab inserts 4 spaces. Your code is saved automatically; it will be reviewed by an evaluator (not compiled).</div>
+          </div>
+          <div class="q-nav">
+            <button class="btn btn-ghost" id="btn-prev">&larr; Previous</button>
+            <button class="btn" id="btn-next">Next &rarr;</button>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <!-- Done -->
+  <div id="screen-done" class="wrap hidden">
+    <div class="card center-note">
+      <div class="big">&#9989;</div>
+      <h2 id="done-title">Assessment submitted</h2>
+      <p id="done-text">Your answers have been received and are under review by the evaluation team.<br>You will be contacted with the outcome.</p>
+      <button class="btn btn-ghost" id="btn-done-levels">Back to levels</button>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="../shared/config.js"></script>
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
