@@ -4,7 +4,7 @@
    server-side in the answer_key table. */
 var EVAL_DATA = {
   "domain": "service",
-  "domainLabel": "Service Engineer",
+  "domainLabel": "Hardware Service Engineer",
   "levels": {
     "fresher": {
       "label": "B.E / Diploma Fresher",
