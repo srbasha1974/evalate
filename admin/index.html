@@ -61,8 +61,47 @@
     </div>
 
     <div id="panel-assessments">
+      <div class="card" style="margin-bottom:16px">
+        <h2>Filters</h2>
+        <div class="filter-row">
+          <div>
+            <label for="f-domain">Domain</label>
+            <select id="f-domain"><option value="">All domains</option></select>
+          </div>
+          <div>
+            <label for="f-level">Level</label>
+            <select id="f-level"><option value="">All levels</option></select>
+          </div>
+          <div>
+            <label for="f-status">Status</label>
+            <select id="f-status">
+              <option value="">All statuses</option>
+              <option value="in_progress">In progress</option>
+              <option value="expired">Expired (not submitted)</option>
+              <option value="submitted">Awaiting review</option>
+              <option value="reviewed">Reviewed</option>
+            </select>
+          </div>
+          <div>
+            <label for="f-before">Started on/before</label>
+            <input type="date" id="f-before">
+          </div>
+          <div style="flex:1;min-width:200px">
+            <label for="f-search">Candidate name/email</label>
+            <input type="text" id="f-search" placeholder="Search…">
+          </div>
+          <div>
+            <label>&nbsp;</label>
+            <button class="btn btn-ghost btn-sm" id="btn-clear-filters" type="button">Clear filters</button>
+          </div>
+        </div>
+      </div>
       <div class="card">
         <h2>Assessments</h2>
+        <div id="bulk-bar" style="display:flex;gap:10px;align-items:center;margin-bottom:12px">
+          <span id="bulk-count" style="font-size:0.85rem;color:var(--muted)">0 selected</span>
+          <button class="btn btn-sm btn-danger" id="btn-bulk-delete" type="button" disabled>Delete selected</button>
+        </div>
         <div id="assess-list"></div>
       </div>
       <div id="assess-detail" class="hidden" style="margin-top:20px"></div>
@@ -93,9 +132,12 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
   <script src="../shared/config.js"></script>
   <script src="../embedded/data.js"></script>
   <script src="../service/data.js"></script>
+  <script src="branding.js"></script>
   <script src="admin.js"></script>
 </body>
 </html>

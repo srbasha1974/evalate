@@ -8,6 +8,8 @@
   var assessments = [];
   var profileById = {};
   var openId = null;      // currently open assessment id
+  var filters = { domain: "", level: "", status: "", before: "", search: "" };
+  var selected = {};      // assessment id -> true, for bulk delete
 
   // all domains' data files register themselves here (embedded, service, ...)
   var REG = window.EVAL_REGISTRY || {};
@@ -109,6 +111,124 @@
     });
   });
 
+  // ---------- filters ----------
+  function populateDomainFilter() {
+    var sel = $("f-domain");
+    Object.keys(REG).forEach(function (d) {
+      var opt = document.createElement("option");
+      opt.value = d;
+      opt.textContent = REG[d].domainLabel || d;
+      sel.appendChild(opt);
+    });
+  }
+
+  function populateLevelFilter() {
+    var sel = $("f-level");
+    var keep = filters.level;
+    sel.innerHTML = '<option value="">All levels</option>';
+    var domains = filters.domain ? [filters.domain] : Object.keys(REG);
+    var seen = {};
+    domains.forEach(function (d) {
+      var dd = REG[d];
+      if (!dd) return;
+      Object.keys(dd.levels).forEach(function (k) {
+        var label = dd.levels[k].label + (filters.domain ? "" : " (" + dd.domainLabel + ")");
+        var optKey = filters.domain ? k : d + "::" + k;
+        if (seen[optKey]) return;
+        seen[optKey] = true;
+        var opt = document.createElement("option");
+        opt.value = optKey;
+        opt.textContent = label;
+        sel.appendChild(opt);
+      });
+    });
+    if (keep && seen[keep]) sel.value = keep; else filters.level = "";
+  }
+
+  function matchesFilters(a) {
+    if (filters.domain && a.domain !== filters.domain) return false;
+    if (filters.level) {
+      var levelKey = filters.level.indexOf("::") !== -1 ? filters.level.split("::") : [a.domain, filters.level];
+      if (a.domain !== levelKey[0] || a.level !== levelKey[1]) return false;
+    }
+    if (filters.status && effectiveStatus(a) !== filters.status) return false;
+    if (filters.before) {
+      if (!a.started_at) return false;
+      var cutoff = new Date(filters.before + "T23:59:59").getTime();
+      if (new Date(a.started_at).getTime() > cutoff) return false;
+    }
+    if (filters.search) {
+      var p = profileById[a.user_id];
+      var hay = ((p ? name(p) : "") + " " + (p ? p.email || "" : "")).toLowerCase();
+      if (hay.indexOf(filters.search.toLowerCase()) === -1) return false;
+    }
+    return true;
+  }
+
+  function filteredAssessments() {
+    return assessments.filter(matchesFilters);
+  }
+
+  populateDomainFilter();
+  populateLevelFilter();
+
+  $("f-domain").addEventListener("change", function () {
+    filters.domain = $("f-domain").value;
+    populateLevelFilter();
+    selected = {};
+    renderAssessments();
+  });
+  ["f-level", "f-status"].forEach(function (id) {
+    $(id).addEventListener("change", function () {
+      filters.level = $("f-level").value;
+      filters.status = $("f-status").value;
+      selected = {};
+      renderAssessments();
+    });
+  });
+  $("f-before").addEventListener("change", function () {
+    filters.before = $("f-before").value;
+    selected = {};
+    renderAssessments();
+  });
+  $("f-search").addEventListener("input", function () {
+    filters.search = $("f-search").value.trim();
+    selected = {};
+    renderAssessments();
+  });
+  $("btn-clear-filters").addEventListener("click", function () {
+    filters = { domain: "", level: "", status: "", before: "", search: "" };
+    $("f-domain").value = ""; $("f-status").value = ""; $("f-before").value = ""; $("f-search").value = "";
+    populateLevelFilter();
+    selected = {};
+    renderAssessments();
+  });
+
+  // ---------- bulk delete ----------
+  function updateBulkBar() {
+    var ids = Object.keys(selected).filter(function (id) { return selected[id]; });
+    $("bulk-count").textContent = ids.length + " selected";
+    $("btn-bulk-delete").disabled = ids.length === 0;
+  }
+
+  $("btn-bulk-delete").addEventListener("click", function () {
+    var ids = Object.keys(selected).filter(function (id) { return selected[id]; });
+    if (!ids.length) return;
+    if (!window.confirm("Permanently delete " + ids.length + " assessment attempt" +
+        (ids.length > 1 ? "s" : "") + "? Candidates will be able to retake the deleted level(s). This cannot be undone.")) return;
+    $("btn-bulk-delete").disabled = true;
+    Promise.all(ids.map(function (id) { return sb.rpc("reset_attempt", { p_id: id }); }))
+      .then(function () {
+        $("btn-bulk-delete").disabled = false;
+        selected = {};
+        if (openId && ids.indexOf(openId) !== -1) {
+          openId = null;
+          $("assess-detail").classList.add("hidden");
+        }
+        loadAll();
+      });
+  });
+
   // ---------- data ----------
   function loadAll() {
     Promise.all([
@@ -131,13 +251,19 @@
   }
 
   // ---------- assessments list ----------
-  function statusBadge(a) {
+  function effectiveStatus(a) {
     if (a.status === "in_progress") {
-      return new Date(a.deadline_at).getTime() > Date.now()
-        ? '<span class="badge badge-warn">In progress</span>'
-        : '<span class="badge badge-warn">Expired (not submitted)</span>';
+      return new Date(a.deadline_at).getTime() > Date.now() ? "in_progress" : "expired";
     }
-    if (a.status === "submitted") return '<span class="badge">Awaiting review</span>';
+    if (a.status === "submitted") return "submitted";
+    return "reviewed";
+  }
+
+  function statusBadge(a) {
+    var s = effectiveStatus(a);
+    if (s === "in_progress") return '<span class="badge badge-warn">In progress</span>';
+    if (s === "expired") return '<span class="badge badge-warn">Expired (not submitted)</span>';
+    if (s === "submitted") return '<span class="badge">Awaiting review</span>';
     return '<span class="badge badge-good">Reviewed</span>';
   }
 
@@ -158,13 +284,24 @@
   function renderAssessments() {
     if (!assessments.length) {
       $("assess-list").innerHTML = '<p class="lead">No assessments yet.</p>';
+      updateBulkBar();
       return;
     }
-    var html = '<table class="grid"><tr><th>Candidate</th><th>Domain</th><th>Level</th><th>Status</th>' +
+    var rows = filteredAssessments();
+    if (!rows.length) {
+      $("assess-list").innerHTML = '<p class="lead">No assessments match the current filters.</p>';
+      updateBulkBar();
+      return;
+    }
+    var allChecked = rows.length > 0 && rows.every(function (a) { return selected[a.id]; });
+    var html = '<table class="grid"><tr><th><input type="checkbox" id="chk-all"' +
+      (allChecked ? " checked" : "") + '></th><th>Candidate</th><th>Domain</th><th>Level</th><th>Status</th>' +
       "<th>MCQ score</th><th>Coding</th><th>Started</th><th>Submitted</th></tr>";
-    assessments.forEach(function (a) {
+    rows.forEach(function (a) {
       var p = profileById[a.user_id];
       html += '<tr class="clickable" data-id="' + a.id + '">' +
+        '<td><input type="checkbox" class="chk-row" data-id="' + a.id + '"' +
+        (selected[a.id] ? " checked" : "") + "></td>" +
         "<td>" + esc(name(p)) + "<br><small style='color:var(--muted)'>" + esc(p ? p.email : "") + "</small></td>" +
         "<td>" + esc(domainLabel(a.domain)) + "</td>" +
         "<td>" + esc(levelLabel(a)) + "</td>" +
@@ -175,7 +312,27 @@
         "<td>" + fmtDate(a.submitted_at) + "</td></tr>";
     });
     html += "</table>";
+    if (assessments.length !== rows.length) {
+      html = '<p style="font-size:0.85rem;color:var(--muted);margin:0 0 10px">Showing ' +
+        rows.length + " of " + assessments.length + " assessments.</p>" + html;
+    }
     $("assess-list").innerHTML = html;
+
+    $("chk-all").addEventListener("click", function (e) {
+      e.stopPropagation();
+      var check = $("chk-all").checked;
+      rows.forEach(function (a) { selected[a.id] = check; });
+      renderAssessments();
+    });
+    Array.prototype.forEach.call(
+      $("assess-list").querySelectorAll("input.chk-row"),
+      function (chk) {
+        chk.addEventListener("click", function (e) { e.stopPropagation(); });
+        chk.addEventListener("change", function () {
+          selected[chk.getAttribute("data-id")] = chk.checked;
+          updateBulkBar();
+        });
+      });
     Array.prototype.forEach.call(
       $("assess-list").querySelectorAll("tr[data-id]"),
       function (tr) {
@@ -186,6 +343,209 @@
           $("assess-detail").scrollIntoView({ behavior: "smooth" });
         });
       });
+    updateBulkBar();
+  }
+
+  // ---------- qualitative skill analysis ----------
+  function qualitativeAnalysis(a) {
+    if (!a.module_scores) return null;
+    var strong = [], moderate = [], weak = [];
+    Object.keys(a.module_scores).forEach(function (m) {
+      var s = a.module_scores[m];
+      if (!s.total) return;
+      var pct = (s.score / s.total) * 100;
+      if (pct >= 75) strong.push(m);
+      else if (pct >= 50) moderate.push(m);
+      else weak.push(m);
+    });
+
+    var combinedScore = a.mcq_score || 0, combinedMax = a.mcq_total || 0;
+    var codingIncluded = a.coding_score != null && a.coding_total;
+    if (codingIncluded) { combinedScore += a.coding_score; combinedMax += a.coding_total; }
+    var combinedPct = combinedMax ? (combinedScore / combinedMax) * 100 : null;
+
+    var verdict, verdictKind;
+    if (combinedPct == null) {
+      verdict = "Not enough scored data yet to assess.";
+      verdictKind = "info";
+    } else if (combinedPct >= 75) {
+      verdict = "Strong overall performance for this level — consistent command across most topics tested.";
+      verdictKind = "ok";
+    } else if (combinedPct >= 50) {
+      verdict = "Moderate performance — solid in some areas, with clear gaps in others worth probing further.";
+      verdictKind = "warn";
+    } else {
+      verdict = "Below expectations for this level, with gaps across multiple areas tested.";
+      verdictKind = "err";
+    }
+
+    return {
+      strong: strong, moderate: moderate, weak: weak,
+      combinedPct: combinedPct, verdict: verdict, verdictKind: verdictKind,
+      codingIncluded: codingIncluded
+    };
+  }
+
+  // ---------- PDF export ----------
+  function writeWrapped(doc, text, x, y, maxWidth, lineHeight) {
+    var lines = doc.splitTextToSize(text, maxWidth);
+    doc.text(lines, x, y);
+    return y + lines.length * (lineHeight || 13);
+  }
+
+  function exportPdf(a) {
+    if (!window.jspdf || !window.jspdf.jsPDF) throw new Error("PDF library did not load");
+    var p = profileById[a.user_id];
+    var lv = levelOf(a);
+    var qa = qualitativeAnalysis(a);
+    var brand = (window.EVAL_BRANDING && window.EVAL_BRANDING[a.domain]) || null;
+
+    var doc = new window.jspdf.jsPDF({ unit: "pt", format: "a4" });
+    var pageW = doc.internal.pageSize.getWidth();
+    var pageH = doc.internal.pageSize.getHeight();
+    var margin = 40;
+    var y;
+
+    var footText = brand
+      ? (brand.company + "  ·  " + brand.address + "  ·  " + brand.phone + "  ·  " + brand.email + "  ·  " + brand.website)
+      : "Kedil Evaluation Portal";
+    doc.setFontSize(8);
+    var footLines = doc.splitTextToSize(footText, pageW - margin * 2);
+    var footBlockH = footLines.length * 10 + 22;
+
+    function ensureSpace(needed) {
+      if (y + needed > pageH - footBlockH - 10) { doc.addPage(); y = 40; }
+    }
+
+    if (brand) {
+      var headerH = 86;
+      doc.setFillColor(brand.colorDark);
+      doc.rect(0, 0, pageW, headerH, "F");
+      var logoH = 44;
+      var logoW = logoH * (brand.logoAspect || 1);
+      try { doc.addImage(brand.logo, "PNG", margin, (headerH - logoH) / 2, logoW, logoH); } catch (e) { /* logo optional */ }
+      doc.setTextColor("#ffffff");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(15);
+      doc.text(brand.company, margin + logoW + 16, headerH / 2 - 3);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.text(brand.tagline, margin + logoW + 16, headerH / 2 + 13);
+      y = headerH + 30;
+    } else {
+      y = 44;
+    }
+
+    doc.setTextColor("#1c2430");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(16);
+    doc.text("Candidate Assessment Report", margin, y);
+    y += 26;
+
+    doc.setFontSize(10);
+    var topicsText = a.modules
+      ? (a.modules.length + " of " + (lv ? lv.modules.length : "?") + " — " + a.modules.join(", "))
+      : "All topics";
+    var rows = [
+      ["Candidate", name(p)],
+      ["Email", p ? p.email || "—" : "—"],
+      ["Domain", domainLabel(a.domain)],
+      ["Level", levelLabel(a)],
+      ["Topics tested", topicsText],
+      ["Started", fmtDate(a.started_at)],
+      ["Submitted", fmtDate(a.submitted_at)],
+      ["Reviewed", a.reviewed_at ? fmtDate(a.reviewed_at) + (a.reviewed_by ? " by " + a.reviewed_by : "") : "—"]
+    ];
+    rows.forEach(function (row) {
+      doc.setFont("helvetica", "bold");
+      doc.text(row[0] + ":", margin, y);
+      doc.setFont("helvetica", "normal");
+      y = writeWrapped(doc, String(row[1] || "—"), margin + 110, y, pageW - margin * 2 - 110, 13);
+    });
+    y += 8;
+
+    var body = Object.keys(a.module_scores || {}).map(function (m) {
+      var s = a.module_scores[m];
+      var pct = s.total ? Math.round((s.score / s.total) * 100) : 0;
+      return [m, s.score + " / " + s.total, pct + "%"];
+    });
+    if (a.coding_score != null) {
+      var codingPct = a.coding_total ? Math.round((a.coding_score / a.coding_total) * 100) : null;
+      body.push(["Coding (evaluator-scored)", a.coding_score + " / " + a.coding_total, codingPct != null ? codingPct + "%" : "—"]);
+    }
+    if (body.length) {
+      doc.autoTable({
+        startY: y,
+        margin: { left: margin, right: margin },
+        head: [["Module", "Score", "%"]],
+        body: body,
+        theme: "grid",
+        styles: { fontSize: 10 },
+        headStyles: brand ? { fillColor: brand.colorPrimary } : undefined
+      });
+      y = doc.lastAutoTable.finalY + 24;
+    }
+
+    ensureSpace(80);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.text("Skill analysis", margin, y);
+    y += 18;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    if (qa) {
+      y = writeWrapped(doc, qa.verdict, margin, y, pageW - margin * 2) + 8;
+      if (qa.strong.length) y = writeWrapped(doc, "Strengths: " + qa.strong.join(", "), margin, y, pageW - margin * 2) + 6;
+      if (qa.moderate.length) y = writeWrapped(doc, "Moderate: " + qa.moderate.join(", "), margin, y, pageW - margin * 2) + 6;
+      if (qa.weak.length) y = writeWrapped(doc, "Needs improvement: " + qa.weak.join(", "), margin, y, pageW - margin * 2) + 6;
+    } else {
+      doc.text("Not enough scored data yet.", margin, y);
+      y += 16;
+    }
+    y += 10;
+
+    var codingQs = [];
+    (lv ? lv.modules : []).forEach(function (m) {
+      if (m.type === "coding" && (!a.modules || a.modules.indexOf(m.name) !== -1)) codingQs = codingQs.concat(m.questions);
+    });
+    if (codingQs.length) {
+      ensureSpace(60);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(12);
+      doc.text("Coding review", margin, y);
+      y += 6;
+      var codingBody = codingQs.map(function (q, i) {
+        var rv = (a.coding_review || {})[String(q.id)] || {};
+        return ["Q" + (i + 1), rv.score != null ? rv.score + " / 10" : "Not yet scored", rv.feedback || "—"];
+      });
+      doc.autoTable({
+        startY: y + 6,
+        margin: { left: margin, right: margin },
+        head: [["Question", "Score", "Evaluator feedback"]],
+        body: codingBody,
+        theme: "grid",
+        styles: { fontSize: 9 },
+        headStyles: brand ? { fillColor: brand.colorPrimary } : undefined
+      });
+      y = doc.lastAutoTable.finalY + 20;
+    }
+
+    var pageCount = doc.internal.getNumberOfPages();
+    for (var i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      var footTop = pageH - footBlockH;
+      doc.setDrawColor(220);
+      doc.line(margin, footTop, pageW - margin, footTop);
+      doc.setFontSize(8);
+      doc.setTextColor(120);
+      doc.text(footLines, margin, footTop + 14);
+      var bottomRowY = footTop + 14 + footLines.length * 10;
+      doc.text("Confidential — internal evaluation use only", margin, bottomRowY);
+      doc.text("Page " + i + " / " + pageCount, pageW - margin, bottomRowY, { align: "right" });
+    }
+
+    var fname = (name(p) || "candidate").replace(/[^a-z0-9]+/gi, "_") + "_" + a.domain + "_" + a.level + ".pdf";
+    doc.save(fname);
   }
 
   // ---------- assessment detail ----------
@@ -237,6 +597,18 @@
       html += "</table>";
     }
 
+    // qualitative skill analysis
+    var qa = qualitativeAnalysis(a);
+    if (qa) {
+      html += "<h2 style='margin-top:22px'>Skill analysis</h2>";
+      html += '<div class="msg msg-' + qa.verdictKind + '" style="max-width:640px">' + esc(qa.verdict) + "</div>";
+      html += '<div style="margin-top:10px;font-size:0.9rem;max-width:640px">';
+      if (qa.strong.length) html += "<p style='margin:6px 0'><strong>Strengths:</strong> " + qa.strong.map(esc).join(", ") + "</p>";
+      if (qa.moderate.length) html += "<p style='margin:6px 0'><strong>Moderate:</strong> " + qa.moderate.map(esc).join(", ") + "</p>";
+      if (qa.weak.length) html += "<p style='margin:6px 0'><strong>Needs improvement:</strong> " + qa.weak.map(esc).join(", ") + "</p>";
+      html += "</div>";
+    }
+
     // coding review
     var codingQs = [];
     (lv ? lv.modules : []).forEach(function (m) {
@@ -272,6 +644,9 @@
     html += '<div style="display:flex;gap:10px;margin-top:20px;flex-wrap:wrap">';
     if (a.status === "submitted") {
       html += '<button class="btn" id="btn-finalize">Finalize review</button>';
+    }
+    if (a.module_scores) {
+      html += '<button class="btn btn-ghost" id="btn-export-pdf">Download PDF report</button>';
     }
     html += '<button class="btn btn-danger" id="btn-reset">Reset attempt (allow retake)</button>';
     html += '<button class="btn btn-ghost" id="btn-close-detail">Close</button>';
@@ -320,6 +695,15 @@
         if (res.error) { fin.disabled = false; dmsg(res.error.message, "err"); }
         else loadAll();
       });
+    });
+
+    var exportBtn = $("btn-export-pdf");
+    if (exportBtn) exportBtn.addEventListener("click", function () {
+      try { exportPdf(a); }
+      catch (e) {
+        if (window.console && console.error) console.error("PDF export failed:", e);
+        dmsg("Could not generate the PDF: " + e.message, "err");
+      }
     });
 
     var force = $("btn-force-score");
