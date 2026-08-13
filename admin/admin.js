@@ -393,8 +393,21 @@
     return y + lines.length * (lineHeight || 13);
   }
 
+  function fetchQuestionResults(a) {
+    return sb.rpc("get_question_results", { p_id: a.id }).then(function (res) {
+      if (res.error || !res.data) return null; // function not added yet, or not authorized — degrade gracefully
+      var map = {};
+      res.data.forEach(function (row) { map[String(row.question_id)] = row.is_correct; });
+      return map;
+    }).catch(function () { return null; });
+  }
+
   function exportPdf(a) {
     if (!window.jspdf || !window.jspdf.jsPDF) throw new Error("PDF library did not load");
+    return fetchQuestionResults(a).then(function (results) { buildPdf(a, results); });
+  }
+
+  function buildPdf(a, results) {
     var p = profileById[a.user_id];
     var lv = levelOf(a);
     var qa = qualitativeAnalysis(a);
@@ -504,14 +517,72 @@
     }
     y += 10;
 
-    // full answer sheet — every question the candidate saw, with what they answered
-    // (never the correct answer/answer key: that's intentionally never sent to the
-    // browser at all, server-side only, so it isn't available here to show)
+    // full answer sheet — every question the candidate saw, with what they answered.
+    // The literal correct answer text is never shown/available here (the answer key
+    // is intentionally never sent to the browser at all) — but if get_question_results
+    // resolved (results != null), we do know per-question right/wrong as a boolean,
+    // which is safe to surface without ever exposing the correct option itself.
     var qModules = (lv ? lv.modules : []).filter(function (m) {
       return !a.modules || a.modules.indexOf(m.name) !== -1;
     });
+
+    function questionOutcome(q, type) {
+      var chosen = a.answers ? a.answers[String(q.id)] : null;
+      if (type === "coding") {
+        var rv = (a.coding_review || {})[String(q.id)] || {};
+        if (!chosen) return { label: "Unanswered", color: [140, 140, 140] };
+        if (rv.score == null) return { label: "Not yet scored", color: [140, 140, 140] };
+        return { label: rv.score + " / 10", color: rv.score >= 6 ? [30, 130, 60] : [180, 45, 45] };
+      }
+      if (!chosen) return { label: "Unanswered", color: [140, 140, 140] };
+      if (!results || results[String(q.id)] == null) return { label: "Answered", color: [90, 100, 115] };
+      return results[String(q.id)]
+        ? { label: "Correct", color: [30, 130, 60] }
+        : { label: "Wrong", color: [180, 45, 45] };
+    }
+
     if (qModules.length) {
-      ensureSpace(40);
+      ensureSpace(50);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(14);
+      doc.setTextColor("#1c2430");
+      doc.text("Question Index", margin, y);
+      y += 16;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      doc.setTextColor(120);
+      var indexNote = results
+        ? "Quick-reference list of every question and its outcome, in the same order as the detailed Answer Sheet below."
+        : "Quick-reference list of every question and whether it was answered. Correct/Wrong marking requires a one-time database update (get_question_results) that hasn't been applied yet — see supabase-question-results.sql.";
+      y = writeWrapped(doc, indexNote, margin, y, pageW - margin * 2, 10) + 8;
+      doc.setTextColor("#1c2430");
+
+      var indexBody = [];
+      qModules.forEach(function (m) {
+        m.questions.forEach(function (q, qi) {
+          var o = questionOutcome(q, m.type);
+          indexBody.push([m.name, String(qi + 1), o.label, o.color]);
+        });
+      });
+      doc.autoTable({
+        startY: y,
+        margin: { left: margin, right: margin },
+        head: [["Module", "Q#", "Result"]],
+        body: indexBody.map(function (r) { return [r[0], r[1], r[2]]; }),
+        theme: "grid",
+        styles: { fontSize: 9 },
+        headStyles: brand ? { fillColor: brand.colorPrimary } : undefined,
+        didParseCell: function (data) {
+          if (data.section === "body" && data.column.index === 2) {
+            var color = indexBody[data.row.index][3];
+            data.cell.styles.textColor = color;
+            data.cell.styles.fontStyle = "bold";
+          }
+        }
+      });
+      y = doc.lastAutoTable.finalY + 24;
+
+      ensureSpace(30);
       doc.setFont("helvetica", "bold");
       doc.setFontSize(14);
       doc.setTextColor("#1c2430");
@@ -520,7 +591,7 @@
       doc.setFont("helvetica", "normal");
       doc.setFontSize(8);
       doc.setTextColor(120);
-      y = writeWrapped(doc, "Shows each question and the candidate's own answer. Correct-answer marking is not included here — the answer key is intentionally never sent to the browser, evaluator dashboards included.", margin, y, pageW - margin * 2, 10) + 10;
+      y = writeWrapped(doc, "Full detail for each question above, in the same order — module, then question number.", margin, y, pageW - margin * 2, 10) + 10;
       doc.setTextColor("#1c2430");
 
       var letters = ["A", "B", "C", "D"];
@@ -535,10 +606,14 @@
           if (m.type === "coding") {
             var code = (a.answers && a.answers[String(q.id)]) || "";
             var rv = (a.coding_review || {})[String(q.id)] || {};
+            var codingOutcome = questionOutcome(q, "coding");
             ensureSpace(30);
             doc.setFont("helvetica", "bold");
             doc.setFontSize(9);
-            y = writeWrapped(doc, (qi + 1) + ". " + q.text, margin, y, pageW - margin * 2, 12) + 3;
+            doc.setTextColor.apply(doc, codingOutcome.color);
+            doc.text("[" + codingOutcome.label + "]", pageW - margin, y, { align: "right" });
+            doc.setTextColor("#1c2430");
+            y = writeWrapped(doc, (qi + 1) + ". " + q.text, margin, y, pageW - margin * 2 - 60, 12) + 3;
             doc.setFont("courier", "normal");
             doc.setFontSize(8);
             if (code) {
@@ -562,18 +637,28 @@
             y += 8;
           } else {
             var chosen = a.answers ? a.answers[String(q.id)] : null;
+            var mcqOutcome = questionOutcome(q, "mcq");
             ensureSpace(34);
             doc.setFont("helvetica", "bold");
             doc.setFontSize(9);
-            y = writeWrapped(doc, (qi + 1) + ". " + q.text, margin, y, pageW - margin * 2, 12) + 2;
+            doc.setTextColor.apply(doc, mcqOutcome.color);
+            doc.text("[" + mcqOutcome.label + "]", pageW - margin, y, { align: "right" });
+            doc.setTextColor("#1c2430");
+            y = writeWrapped(doc, (qi + 1) + ". " + q.text, margin, y, pageW - margin * 2 - 60, 12) + 2;
             doc.setFont("helvetica", "normal");
             (q.options || []).forEach(function (opt, oi) {
               var l = letters[oi];
               var isChosen = chosen === l;
               ensureSpace(12);
-              if (isChosen) doc.setFont("helvetica", "bold");
+              if (isChosen) {
+                doc.setFont("helvetica", "bold");
+                doc.setTextColor.apply(doc, mcqOutcome.color);
+              }
               y = writeWrapped(doc, (isChosen ? "-> " : "    ") + l + ") " + opt, margin + 6, y, pageW - margin * 2 - 6, 11);
-              if (isChosen) doc.setFont("helvetica", "normal");
+              if (isChosen) {
+                doc.setFont("helvetica", "normal");
+                doc.setTextColor("#1c2430");
+              }
             });
             if (!chosen) {
               doc.setTextColor(150);
@@ -756,11 +841,18 @@
 
     var exportBtn = $("btn-export-pdf");
     if (exportBtn) exportBtn.addEventListener("click", function () {
-      try { exportPdf(a); }
-      catch (e) {
-        if (window.console && console.error) console.error("PDF export failed:", e);
-        dmsg("Could not generate the PDF: " + e.message, "err");
-      }
+      exportBtn.disabled = true;
+      var origLabel = exportBtn.textContent;
+      exportBtn.textContent = "Generating…";
+      Promise.resolve().then(function () { return exportPdf(a); })
+        .catch(function (e) {
+          if (window.console && console.error) console.error("PDF export failed:", e);
+          dmsg("Could not generate the PDF: " + e.message, "err");
+        })
+        .then(function () {
+          exportBtn.disabled = false;
+          exportBtn.textContent = origLabel;
+        });
     });
 
     var force = $("btn-force-score");
