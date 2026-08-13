@@ -236,6 +236,7 @@ a.tile:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(16,30,54
 .q-nav { display: flex; justify-content: space-between; margin-top: 18px; gap: 10px; }
 
 /* ---- tables (admin) ---- */
+#assess-list, #cand-list, #admin-list { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 table.grid { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
 table.grid th, table.grid td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); }
 table.grid th { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); }
