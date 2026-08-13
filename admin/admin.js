@@ -504,30 +504,87 @@
     }
     y += 10;
 
-    var codingQs = [];
-    (lv ? lv.modules : []).forEach(function (m) {
-      if (m.type === "coding" && (!a.modules || a.modules.indexOf(m.name) !== -1)) codingQs = codingQs.concat(m.questions);
+    // full answer sheet — every question the candidate saw, with what they answered
+    // (never the correct answer/answer key: that's intentionally never sent to the
+    // browser at all, server-side only, so it isn't available here to show)
+    var qModules = (lv ? lv.modules : []).filter(function (m) {
+      return !a.modules || a.modules.indexOf(m.name) !== -1;
     });
-    if (codingQs.length) {
-      ensureSpace(60);
+    if (qModules.length) {
+      ensureSpace(40);
       doc.setFont("helvetica", "bold");
-      doc.setFontSize(12);
-      doc.text("Coding review", margin, y);
-      y += 6;
-      var codingBody = codingQs.map(function (q, i) {
-        var rv = (a.coding_review || {})[String(q.id)] || {};
-        return ["Q" + (i + 1), rv.score != null ? rv.score + " / 10" : "Not yet scored", rv.feedback || "—"];
+      doc.setFontSize(14);
+      doc.setTextColor("#1c2430");
+      doc.text("Answer Sheet", margin, y);
+      y += 16;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      doc.setTextColor(120);
+      y = writeWrapped(doc, "Shows each question and the candidate's own answer. Correct-answer marking is not included here — the answer key is intentionally never sent to the browser, evaluator dashboards included.", margin, y, pageW - margin * 2, 10) + 10;
+      doc.setTextColor("#1c2430");
+
+      var letters = ["A", "B", "C", "D"];
+      qModules.forEach(function (m) {
+        ensureSpace(28);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(11);
+        doc.text(m.name, margin, y);
+        y += 15;
+
+        m.questions.forEach(function (q, qi) {
+          if (m.type === "coding") {
+            var code = (a.answers && a.answers[String(q.id)]) || "";
+            var rv = (a.coding_review || {})[String(q.id)] || {};
+            ensureSpace(30);
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(9);
+            y = writeWrapped(doc, (qi + 1) + ". " + q.text, margin, y, pageW - margin * 2, 12) + 3;
+            doc.setFont("courier", "normal");
+            doc.setFontSize(8);
+            if (code) {
+              doc.splitTextToSize(code, pageW - margin * 2 - 10).forEach(function (line) {
+                ensureSpace(11);
+                doc.text(line, margin + 8, y);
+                y += 10;
+              });
+            } else {
+              doc.setTextColor(150);
+              ensureSpace(11);
+              doc.text("No answer given.", margin + 8, y);
+              y += 10;
+              doc.setTextColor("#1c2430");
+            }
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(9);
+            if (rv.score != null) {
+              y = writeWrapped(doc, "Evaluator score: " + rv.score + " / 10" + (rv.feedback ? "  —  " + rv.feedback : ""), margin, y, pageW - margin * 2, 11) + 2;
+            }
+            y += 8;
+          } else {
+            var chosen = a.answers ? a.answers[String(q.id)] : null;
+            ensureSpace(34);
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(9);
+            y = writeWrapped(doc, (qi + 1) + ". " + q.text, margin, y, pageW - margin * 2, 12) + 2;
+            doc.setFont("helvetica", "normal");
+            (q.options || []).forEach(function (opt, oi) {
+              var l = letters[oi];
+              var isChosen = chosen === l;
+              ensureSpace(12);
+              if (isChosen) doc.setFont("helvetica", "bold");
+              y = writeWrapped(doc, (isChosen ? "-> " : "    ") + l + ") " + opt, margin + 6, y, pageW - margin * 2 - 6, 11);
+              if (isChosen) doc.setFont("helvetica", "normal");
+            });
+            if (!chosen) {
+              doc.setTextColor(150);
+              y = writeWrapped(doc, "(Not answered)", margin + 6, y, pageW - margin * 2 - 6, 11);
+              doc.setTextColor("#1c2430");
+            }
+            y += 6;
+          }
+        });
+        y += 6;
       });
-      doc.autoTable({
-        startY: y + 6,
-        margin: { left: margin, right: margin },
-        head: [["Question", "Score", "Evaluator feedback"]],
-        body: codingBody,
-        theme: "grid",
-        styles: { fontSize: 9 },
-        headStyles: brand ? { fillColor: brand.colorPrimary } : undefined
-      });
-      y = doc.lastAutoTable.finalY + 20;
     }
 
     var pageCount = doc.internal.getNumberOfPages();
