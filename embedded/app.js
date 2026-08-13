@@ -14,6 +14,36 @@
   var tickTimer = null;
   var submitting = false;
 
+  // ---------- integrity signals (soft heuristics, not proctoring) ----------
+  // Tracks tab/window switches and large-paste bursts into the coding editor
+  // during a live exam. Never blocks or warns the candidate — just gives the
+  // evaluator a data point alongside the answers.
+  var integrity = { tabSwitchCount: 0, tabAwayMs: 0, pasteCount: 0, pasteCharsTotal: 0, largePasteCount: 0 };
+  var integrityAwaySince = null;
+  var integrityDebounce = null;
+  function examLive() {
+    return assessment && assessment.status === "in_progress" && !$("screen-exam").classList.contains("hidden");
+  }
+  function scheduleIntegritySave() {
+    if (integrityDebounce) clearTimeout(integrityDebounce);
+    integrityDebounce = setTimeout(saveIntegrity, 3000);
+  }
+  function saveIntegrity() {
+    if (!assessment || submitting) return;
+    sb.rpc("log_integrity", { p_id: assessment.id, p_flags: integrity }).catch(function () {});
+  }
+  window.addEventListener("blur", function () {
+    if (!examLive() || integrityAwaySince != null) return;
+    integrityAwaySince = Date.now();
+    integrity.tabSwitchCount++;
+  });
+  window.addEventListener("focus", function () {
+    if (integrityAwaySince == null) return;
+    integrity.tabAwayMs += Date.now() - integrityAwaySince;
+    integrityAwaySince = null;
+    if (examLive()) scheduleIntegritySave();
+  });
+
   // ---------- helpers ----------
   function $(id) { return document.getElementById(id); }
   function show(id) {
@@ -267,6 +297,8 @@
         if (res.error) { msg("ins-msg", res.error.message); return; }
         assessment = res.data;
         answers = assessment.answers || {};
+        integrity = assessment.integrity || { tabSwitchCount: 0, tabAwayMs: 0, pasteCount: 0, pasteCharsTotal: 0, largePasteCount: 0 };
+        integrityAwaySince = null;
         if (assessment.status !== "in_progress") { showDone(); return; }
         if (new Date(assessment.deadline_at).getTime() <= Date.now()) {
           finalSubmit(true);
@@ -393,6 +425,15 @@
   }
   $("code-input").addEventListener("input", function () { dirty = true; scheduleSave(); });
   $("code-input").addEventListener("blur", commitCode);
+  $("code-input").addEventListener("paste", function (e) {
+    var text = ((e.clipboardData || window.clipboardData || {}).getData
+      ? (e.clipboardData || window.clipboardData).getData("text") : "") || "";
+    if (!text) return;
+    integrity.pasteCount++;
+    integrity.pasteCharsTotal += text.length;
+    if (text.length > 40) integrity.largePasteCount++;
+    if (examLive()) scheduleIntegritySave();
+  });
   $("code-input").addEventListener("keydown", function (e) {
     if (e.key === "Tab") {
       e.preventDefault();
@@ -488,6 +529,12 @@
     if (submitting) return;
     submitting = true;
     stopTimers();
+    if (integrityAwaySince != null) {
+      integrity.tabAwayMs += Date.now() - integrityAwaySince;
+      integrityAwaySince = null;
+    }
+    if (integrityDebounce) clearTimeout(integrityDebounce);
+    sb.rpc("log_integrity", { p_id: assessment.id, p_flags: integrity }).catch(function () {});
     sb.rpc("submit_assessment", { p_id: assessment.id, p_answers: answers })
       .then(function (res) {
         submitting = false;

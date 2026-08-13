@@ -299,10 +299,14 @@
       "<th>MCQ score</th><th>Coding</th><th>Started</th><th>Submitted</th></tr>";
     rows.forEach(function (a) {
       var p = profileById[a.user_id];
+      var ig = integritySummary(a);
       html += '<tr class="clickable" data-id="' + a.id + '">' +
         '<td><input type="checkbox" class="chk-row" data-id="' + a.id + '"' +
         (selected[a.id] ? " checked" : "") + "></td>" +
-        "<td>" + esc(name(p)) + "<br><small style='color:var(--muted)'>" + esc(p ? p.email : "") + "</small></td>" +
+        "<td>" + esc(name(p)) +
+        (ig && ig.notable ? ' <span class="badge badge-warn" title="Left the tab ' + ig.tabSwitchCount +
+          ' time(s), ' + ig.tabAwayMinutes + ' min away">Flagged</span>' : "") +
+        "<br><small style='color:var(--muted)'>" + esc(p ? p.email : "") + "</small></td>" +
         "<td>" + esc(domainLabel(a.domain)) + "</td>" +
         "<td>" + esc(levelLabel(a)) + "</td>" +
         "<td>" + statusBadge(a) + "</td>" +
@@ -347,6 +351,24 @@
   }
 
   // ---------- qualitative skill analysis ----------
+  // ---------- integrity signals ----------
+  function integritySummary(a) {
+    var g = a.integrity;
+    if (!g) return null;
+    var tabSwitchCount = g.tabSwitchCount || 0;
+    var tabAwayMs = g.tabAwayMs || 0;
+    var pasteCount = g.pasteCount || 0;
+    var largePasteCount = g.largePasteCount || 0;
+    if (!tabSwitchCount && !pasteCount) return null;
+    return {
+      tabSwitchCount: tabSwitchCount,
+      tabAwayMinutes: Math.round((tabAwayMs / 60000) * 10) / 10,
+      pasteCount: pasteCount,
+      largePasteCount: largePasteCount,
+      notable: tabSwitchCount >= 3 || tabAwayMs >= 60000 || largePasteCount >= 1
+    };
+  }
+
   function qualitativeAnalysis(a) {
     if (!a.module_scores) return null;
     var strong = [], moderate = [], weak = [];
@@ -516,6 +538,31 @@
       y += 16;
     }
     y += 10;
+
+    var ig = integritySummary(a);
+    if (ig) {
+      ensureSpace(50);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(12);
+      doc.setTextColor("#1c2430");
+      doc.text("Integrity signals", margin, y);
+      y += 16;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.setTextColor.apply(doc, ig.notable ? [180, 45, 45] : [90, 100, 115]);
+      var igLine = "Left the exam tab " + ig.tabSwitchCount + (ig.tabSwitchCount === 1 ? " time" : " times") +
+        (ig.tabAwayMinutes > 0 ? " (" + ig.tabAwayMinutes + " min total away)" : "") + ". " +
+        (ig.pasteCount > 0
+          ? ig.pasteCount + " paste" + (ig.pasteCount === 1 ? "" : "s") + " into the coding editor" +
+            (ig.largePasteCount > 0 ? ", " + ig.largePasteCount + " large (40+ characters in one go)" : "") + "."
+          : "No pastes into the coding editor.");
+      y = writeWrapped(doc, igLine, margin, y, pageW - margin * 2) + 4;
+      doc.setFont("helvetica", "italic");
+      doc.setFontSize(8);
+      doc.setTextColor(120);
+      y = writeWrapped(doc, "Not proof of anything on its own — a heuristic to weigh alongside the answers.", margin, y, pageW - margin * 2, 10) + 12;
+      doc.setTextColor("#1c2430");
+    }
 
     // full answer sheet — every question the candidate saw, with what they answered.
     // The literal correct answer text is never shown/available here (the answer key
@@ -716,6 +763,21 @@
       }
     } else {
       html += '<p style="font-size:0.9rem;margin:4px 0"><strong>Topics:</strong> all</p>';
+    }
+
+    // integrity signals — soft heuristics, not proof of anything
+    var ig = integritySummary(a);
+    if (ig) {
+      html += '<div class="msg msg-' + (ig.notable ? "warn" : "info") + '" style="max-width:640px">' +
+        "<strong>Integrity signals:</strong> left the exam tab " + ig.tabSwitchCount +
+        (ig.tabSwitchCount === 1 ? " time" : " times") +
+        (ig.tabAwayMinutes > 0 ? " (" + ig.tabAwayMinutes + " min total away)" : "") + ". " +
+        (ig.pasteCount > 0
+          ? ig.pasteCount + " paste" + (ig.pasteCount === 1 ? "" : "s") + " into the coding editor" +
+            (ig.largePasteCount > 0 ? ", " + ig.largePasteCount + " of them large (40+ characters in one go)" : "") + "."
+          : "No pastes into the coding editor.") +
+        '<br><span style="font-size:0.8rem;opacity:0.85">Not proof of anything on its own — a heuristic to weigh alongside the answers.</span>' +
+        "</div>";
     }
 
     // force-score an expired attempt
